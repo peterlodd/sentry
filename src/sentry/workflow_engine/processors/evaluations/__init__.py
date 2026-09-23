@@ -14,6 +14,7 @@ __all__ = [
     "ProcessWorkflowsResult",
     "WorkflowEvaluation",
     "WorkflowEvaluationArtifact",
+    "WorkflowEvaluationBatch",
     "WorkflowEvaluationData",
     "WorkflowEvaluationOutcome",
 ]
@@ -34,6 +35,7 @@ from .workflow import (
     ProcessWorkflowsResult,
     WorkflowEvaluation,
     WorkflowEvaluationArtifact,
+    WorkflowEvaluationBatch,
     WorkflowEvaluationData,
     WorkflowEvaluationOutcome,
 )
