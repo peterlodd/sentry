@@ -39,6 +39,9 @@ TEXT_DELIMITER = " · "
 MAX_SUBJECT_PROJECTS = 2
 # Slack enforces a hard limit of 50 blocks per chat.postMessage call.
 SLACK_MAX_BLOCKS = 50
+# SlackRenderer always wraps the body with a subject HeaderBlock and a footer ContextBlock.
+# These must be subtracted from SLACK_MAX_BLOCKS when computing the body section budget.
+SLACK_RENDERER_OVERHEAD = 2
 
 
 class DeployReleaseCommit(TypedDict):
@@ -140,9 +143,16 @@ def build_deploy_body(data: DeployReleaseData) -> list[NotificationSection]:
         commits_sections.append(ParagraphSection(blocks=[BoldTextBlock(text="Repositories:")]))
 
         # Slack enforces a maximum of SLACK_MAX_BLOCKS blocks per message.
-        # Calculate the total budget available for commits_sections (which already
-        # includes the "Repositories:" header above).
-        commits_budget = SLACK_MAX_BLOCKS - len(summary_sections) - len(project_sections)
+        # SlackRenderer adds SLACK_RENDERER_OVERHEAD blocks (subject HeaderBlock + footer
+        # ContextBlock) around the body, so subtract those along with the already-built
+        # summary and project sections to get the budget for commits_sections (which
+        # already includes the "Repositories:" header above).
+        commits_budget = (
+            SLACK_MAX_BLOCKS
+            - SLACK_RENDERER_OVERHEAD
+            - len(summary_sections)
+            - len(project_sections)
+        )
 
         total_commits = sum(len(c) for c in data.repo_name_to_commits.values())
         shown_commits = 0
