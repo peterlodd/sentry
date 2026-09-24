@@ -37,6 +37,8 @@ from sentry.users.services.user.service import user_service
 
 TEXT_DELIMITER = " · "
 MAX_SUBJECT_PROJECTS = 2
+# Slack enforces a hard limit of 50 blocks per chat.postMessage call.
+SLACK_MAX_BLOCKS = 50
 
 
 class DeployReleaseCommit(TypedDict):
@@ -136,10 +138,29 @@ def build_deploy_body(data: DeployReleaseData) -> list[NotificationSection]:
     commits_sections: list[NotificationSection] = []
     if data.repo_name_to_commits:
         commits_sections.append(ParagraphSection(blocks=[BoldTextBlock(text="Repositories:")]))
+
+        # Slack enforces a maximum of SLACK_MAX_BLOCKS blocks per message.
+        # Calculate the total budget available for commits_sections (which already
+        # includes the "Repositories:" header above).
+        commits_budget = SLACK_MAX_BLOCKS - len(summary_sections) - len(project_sections)
+
+        total_commits = sum(len(c) for c in data.repo_name_to_commits.values())
+        shown_commits = 0
+        truncated = False
+
         for repo_name, commits in data.repo_name_to_commits.items():
+            if truncated:
+                break
+            # Reserve 1 slot for a potential truncation notice before adding the repo header.
+            if len(commits_sections) >= commits_budget - 1:
+                truncated = True
+                break
             commits_sections.append(ParagraphSection(blocks=[BoldTextBlock(text=repo_name)]))
-            repo_sections: list[NotificationSection] = []
             for commit in commits:
+                # Reserve 1 slot for a potential truncation notice before adding each commit.
+                if len(commits_sections) >= commits_budget - 1:
+                    truncated = True
+                    break
                 commit_blocks = [
                     PlainTextBlock(commit["message"]),
                     PlainTextBlock(text=TEXT_DELIMITER),
@@ -149,8 +170,20 @@ def build_deploy_body(data: DeployReleaseData) -> list[NotificationSection]:
                     PlainTextBlock(text=TEXT_DELIMITER),
                     CodeTextBlock(text=commit["sha"]),
                 ]
-                repo_sections.append(ParagraphSection(blocks=commit_blocks))
-            commits_sections.extend(repo_sections)
+                commits_sections.append(ParagraphSection(blocks=commit_blocks))
+                shown_commits += 1
+
+        if truncated and len(commits_sections) < commits_budget:
+            omitted = total_commits - shown_commits
+            commits_sections.append(
+                ParagraphSection(
+                    blocks=[
+                        ItalicTextBlock(
+                            text=f"{omitted} more commit{pluralize(omitted)} not shown."
+                        )
+                    ]
+                )
+            )
     else:
         commits_sections.append(
             ParagraphSection(
