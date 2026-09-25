@@ -18,6 +18,19 @@ def escape_slack_text(txt: str | None) -> str:
     return txt.translate(translator)
 
 
+def escape_slack_link_text(txt: str | None) -> str:
+    """
+    Escape text for use as a Slack mrkdwn link label (<url|label>).
+
+    Slack only parses link syntax when the label is a single line, so whitespace
+    (including newlines) is collapsed before applying escape_slack_text.
+    """
+    if not txt:
+        return ""
+    collapsed = re.sub(r"\s+", " ", txt).strip()
+    return escape_slack_text(collapsed)
+
+
 def escape_slack_markdown_text(txt: str | None) -> str:
     """
     Reduces runs of multiple backticks to a single backtick.

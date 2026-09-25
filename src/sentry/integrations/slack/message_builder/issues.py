@@ -35,6 +35,7 @@ from sentry.integrations.slack.message_builder.types import (
 )
 from sentry.integrations.slack.message_builder.util import build_slack_footer
 from sentry.integrations.slack.utils.escape import (
+    escape_slack_link_text,
     escape_slack_markdown_text,
     escape_slack_text,
 )
@@ -456,7 +457,7 @@ class SlackIssuesMessageBuilder(BlockSlackMessageBuilder):
         title = build_attachment_title(event_or_group)
         title_emojis = self.get_title_emoji(has_action)
 
-        title_text = f"{title_emojis} <{title_link}|*{escape_slack_text(title)}*>"
+        title_text = f"{title_emojis} <{title_link}|*{escape_slack_link_text(title)}*>"
         return self.get_markdown_block(title_text)
 
     def get_title_emoji(self, has_action: bool) -> str:

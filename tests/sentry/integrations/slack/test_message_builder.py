@@ -910,6 +910,31 @@ class BuildGroupAttachmentTest(TestCase, PerformanceIssueTestCase, OccurrenceTes
         assert isinstance(ret, dict)
         assert "<https://example.com/|*Click Here*>" in ret["blocks"][1]["text"]["text"]
 
+    def test_multiline_feedback_title_produces_single_line_link(self) -> None:
+        """
+        Slack mrkdwn link labels must be a single line. User Feedback titles include
+        the reporter's message verbatim, so newlines would otherwise break the link.
+        """
+        event = self.store_event(
+            data={"message": "Hello world", "level": "error"}, project_id=self.project.id
+        )
+        group_event = event.for_group(event.groups[0])
+        occurrence = self.build_occurrence(
+            level="info",
+            issue_title="User Feedback: the app freezes on checkout\n\nreproduced twice",
+            type=FeedbackGroup.type_id,
+        )
+        occurrence.save()
+        group_event.occurrence = occurrence
+        group_event.group.type = FeedbackGroup.type_id
+
+        blocks = SlackIssuesMessageBuilder(group=group_event.group, event=group_event).build()
+        assert isinstance(blocks, dict)
+
+        title_text = blocks["blocks"][0]["text"]["text"]
+        assert "\n" not in title_text
+        assert "|*User Feedback: the app freezes on checkout reproduced twice*>" in title_text
+
     def test_compact_alerts_basic_layout(self) -> None:
         """
         Test that the message uses a compact layout:
