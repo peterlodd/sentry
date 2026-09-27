@@ -22,7 +22,7 @@ const ONE_HOUR = 60;
 /**
  * Ignore durations are in munutes
  */
-const IGNORE_DURATIONS = [
+export const IGNORE_DURATIONS = [
   ONE_HOUR / 2,
   ONE_HOUR * 2,
   ONE_HOUR * 6,

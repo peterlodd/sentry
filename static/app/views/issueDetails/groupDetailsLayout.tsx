@@ -27,7 +27,10 @@ import {
 } from 'sentry/views/issueDetails/issueDetailsTour';
 import {SampleEventAlert} from 'sentry/views/issueDetails/sampleEventAlert';
 import {IssueDetailsSidebar} from 'sentry/views/issueDetails/sidebar/sidebar';
-import {ToggleSidebar} from 'sentry/views/issueDetails/sidebar/toggleSidebar';
+import {
+  ToggleSidebar,
+  ToggleSidebarHotkey,
+} from 'sentry/views/issueDetails/sidebar/toggleSidebar';
 import {Tab} from 'sentry/views/issueDetails/types';
 import {useGroupDetailsRoute} from 'sentry/views/issueDetails/useGroupDetailsRoute';
 import {
@@ -203,6 +206,7 @@ export function GroupDetailsLayout({
 
   return (
     <IssueDetailsContextProvider>
+      <ToggleSidebarHotkey />
       {isSampleError && (
         <SampleEventAlert project={group.project} organization={organization} />
       )}

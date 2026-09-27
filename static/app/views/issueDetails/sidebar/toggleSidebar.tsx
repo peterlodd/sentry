@@ -2,23 +2,52 @@ import {css} from '@emotion/react';
 import styled from '@emotion/styled';
 
 import {Button} from '@sentry/scraps/button';
-import {Container} from '@sentry/scraps/layout';
+import {Hotkey, useHotkeys} from '@sentry/scraps/hotkey';
+import {Container, Flex} from '@sentry/scraps/layout';
 
 import {IconChevron} from 'sentry/icons/iconChevron';
 import {t} from 'sentry/locale';
 import {useOrganization} from 'sentry/utils/useOrganization';
 import {useIssueDetails} from 'sentry/views/issueDetails/context';
 
+const TOGGLE_SIDEBAR_HOTKEY = 'mod+alt+s';
+
+/**
+ * Registers the sidebar toggle hotkey. Render once per issue details page,
+ * since `ToggleSidebar` buttons can appear in more than one place.
+ */
+export function ToggleSidebarHotkey() {
+  const {isSidebarOpen, dispatch} = useIssueDetails();
+
+  useHotkeys([
+    {
+      match: TOGGLE_SIDEBAR_HOTKEY,
+      callback: () => dispatch({type: 'UPDATE_SIDEBAR_STATE', isOpen: !isSidebarOpen}),
+    },
+  ]);
+
+  return null;
+}
+
 export function ToggleSidebar({size = 'md'}: {size?: 'md' | 'sm'}) {
   const organization = useOrganization();
   const {isSidebarOpen, dispatch} = useIssueDetails();
+  const label = isSidebarOpen ? t('Close sidebar') : t('Open sidebar');
 
   return (
     <Container position="relative" display={{zero: 'none', '4xl': 'block'}}>
       <ToggleButton
         expanded={isSidebarOpen}
         onClick={() => dispatch({type: 'UPDATE_SIDEBAR_STATE', isOpen: !isSidebarOpen})}
-        aria-label={isSidebarOpen ? t('Close sidebar') : t('Open sidebar')}
+        aria-label={label}
+        tooltipProps={{
+          title: (
+            <Flex align="center" gap="sm">
+              {label}
+              <Hotkey value={TOGGLE_SIDEBAR_HOTKEY} />
+            </Flex>
+          ),
+        }}
         style={size === 'md' ? undefined : {height: '26px'}}
         analyticsEventKey="issue_details.sidebar_toggle"
         analyticsEventName="Issue Details: Sidebar Toggle"

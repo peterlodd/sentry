@@ -5,6 +5,7 @@ import {useMutation, useQueryClient} from '@tanstack/react-query';
 
 import {Button} from '@sentry/scraps/button';
 import {DropdownMenu} from '@sentry/scraps/dropdownMenu';
+import {Hotkey, useHotkeys} from '@sentry/scraps/hotkey';
 import {Flex} from '@sentry/scraps/layout';
 import {useModal} from '@sentry/scraps/modal';
 
@@ -18,17 +19,19 @@ import type {ModalRenderProps} from 'sentry/actionCreators/modal';
 import {openReprocessEventModal} from 'sentry/actionCreators/modal';
 import Feature from 'sentry/components/acl/feature';
 import {FeatureDisabled} from 'sentry/components/acl/featureDisabled';
-import {ArchiveActions} from 'sentry/components/actions/archive';
+import {ArchiveActions, IGNORE_DURATIONS} from 'sentry/components/actions/archive';
 import {ResolveActions} from 'sentry/components/actions/resolve';
 import {CMDKAction} from 'sentry/components/commandPalette/ui/cmdk';
 import {CommandPaletteSlot} from 'sentry/components/commandPalette/ui/commandPaletteSlot';
 import {openConfirmModal} from 'sentry/components/confirm';
+import {useHandleAssigneeChange} from 'sentry/components/group/assigneeSelector';
 import ProjectBadge from 'sentry/components/idBadge/projectBadge';
 import {
   IconCheckmark,
   IconClock,
   IconCopy,
   IconEllipsis,
+  IconStar,
   IconSubscribed,
   IconUnsubscribed,
   IconUpload,
@@ -42,6 +45,7 @@ import type {Project} from 'sentry/types/project';
 import {trackAnalytics} from 'sentry/utils/analytics';
 import {getUtcDateString} from 'sentry/utils/dates';
 import {displayReprocessEventAction} from 'sentry/utils/displayReprocessEventAction';
+import {getDuration} from 'sentry/utils/duration/getDuration';
 import {getAnalyticsDataForGroup, getMessage, getTitle} from 'sentry/utils/events';
 import {getStacktraceBody} from 'sentry/utils/getStacktraceBody';
 import {getConfigForIssueType} from 'sentry/utils/issueTypeConfig';
@@ -51,6 +55,7 @@ import {copyToClipboard} from 'sentry/utils/useCopyToClipboard';
 import {useLocation} from 'sentry/utils/useLocation';
 import {useNavigate} from 'sentry/utils/useNavigate';
 import {useOrganization} from 'sentry/utils/useOrganization';
+import {useUser} from 'sentry/utils/useUser';
 import {isVersionInfoSemver} from 'sentry/views/explore/releases/utils';
 import {SeerCommandPaletteActions} from 'sentry/views/issueDetails/actions/seerCommandPaletteActions';
 import {ShareIssueModal} from 'sentry/views/issueDetails/actions/shareModal';
@@ -188,16 +193,21 @@ export function GroupActions({group, project, disabled, event}: GroupActionsProp
   const theme = useTheme();
   const api = useApi({persistInFlight: true});
   const organization = useOrganization();
+  const user = useUser();
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
   const {mutate: discardIssue} = useMutation(discardIssueMutationOptions({navigate}));
+  const {handleAssigneeChange} = useHandleAssigneeChange({organization, group});
 
   const bookmarkKey = group.isBookmarked ? 'unbookmark' : 'bookmark';
   const bookmarkTitle = group.isBookmarked ? t('Remove bookmark') : t('Bookmark');
   const isResolved = group.status === 'resolved';
   const isIgnored = group.status === 'ignored';
   const hasDeleteAccess = organization.access.includes('event:admin');
+  const hasRelease = !!project.features?.includes('releases');
+  const isAssignedToMe =
+    group.assignedTo?.type === 'user' && String(group.assignedTo.id) === String(user?.id);
 
   const config = useMemo(() => getConfigForIssueType(group, project), [group, project]);
   const issueCommandLabel = useMemo(() => {
@@ -221,6 +231,7 @@ export function GroupActions({group, project, disabled, event}: GroupActionsProp
       delete: deleteCap,
       deleteAndDiscard: deleteDiscardCap,
       resolve: resolveCap,
+      resolveInRelease: resolveInReleaseCap,
       share: shareCap,
     },
     customCopy: {resolution: resolvedCopyCap},
@@ -324,6 +335,48 @@ export function GroupActions({group, project, disabled, event}: GroupActionsProp
     }
     IssueListCacheStore.reset();
   };
+
+  const resolve = () =>
+    onUpdate({status: GroupStatus.RESOLVED, statusDetails: {}, substatus: null});
+
+  const unresolve = () =>
+    onUpdate({
+      status: GroupStatus.UNRESOLVED,
+      statusDetails: {},
+      substatus: GroupSubstatus.ONGOING,
+    });
+
+  const archive = () =>
+    onUpdate({
+      status: GroupStatus.IGNORED,
+      statusDetails: {},
+      substatus: GroupSubstatus.ARCHIVED_UNTIL_ESCALATING,
+    });
+
+  const assignToMe = () => {
+    if (!user || isAssignedToMe) {
+      return;
+    }
+    handleAssigneeChange({assignee: user, id: user.id, type: 'user'});
+  };
+
+  useHotkeys([
+    {
+      match: 'mod+alt+r',
+      enabled: !disabled && resolveCap.enabled && !isIgnored,
+      callback: () => (isResolved ? unresolve() : resolve()),
+    },
+    {
+      match: 'mod+alt+e',
+      enabled: !disabled && !isResolved,
+      callback: () => (isIgnored ? unresolve() : archive()),
+    },
+    {
+      match: 'mod+alt+a',
+      enabled: !disabled && !!user && !isAssignedToMe,
+      callback: assignToMe,
+    },
+  ]);
 
   const onReprocessEvent = () => {
     openReprocessEventModal({organization, groupId: group.id});
@@ -470,52 +523,120 @@ export function GroupActions({group, project, disabled, event}: GroupActionsProp
                 display={{
                   label: t('Resolve'),
                   icon: <IconCheckmark />,
+                  trailingItem: <Hotkey value="mod+alt+r" />,
                 }}
+                onAction={resolve}
+              />
+            )}
+            {resolveCap.enabled &&
+              resolveInReleaseCap.enabled &&
+              hasRelease &&
+              !isResolved &&
+              !isIgnored && (
+                <CMDKAction
+                  display={{label: t('Resolve in next release'), icon: <IconCheckmark />}}
+                  keywords={['release', 'deploy']}
+                  onAction={() =>
+                    onUpdate({
+                      status: GroupStatus.RESOLVED,
+                      statusDetails: {inNextRelease: true},
+                      substatus: null,
+                    })
+                  }
+                />
+              )}
+            {!isResolved && !isIgnored && (
+              <CMDKAction
+                display={{
+                  label: t('Archive'),
+                  icon: <IconClock />,
+                  trailingItem: <Hotkey value="mod+alt+e" />,
+                }}
+                keywords={['ignore', 'mute', 'snooze']}
+                onAction={archive}
+              />
+            )}
+            {!isResolved && !isIgnored && (
+              <CMDKAction
+                display={{label: t('Archive forever'), icon: <IconClock />}}
+                keywords={['ignore', 'mute']}
                 onAction={() =>
                   onUpdate({
-                    status: GroupStatus.RESOLVED,
+                    status: GroupStatus.IGNORED,
                     statusDetails: {},
-                    substatus: null,
+                    substatus: GroupSubstatus.ARCHIVED_FOREVER,
                   })
                 }
               />
             )}
             {!isResolved && !isIgnored && (
               <CMDKAction
-                display={{label: t('Archive'), icon: <IconClock />}}
-                onAction={() =>
-                  onUpdate({
-                    status: GroupStatus.IGNORED,
-                    statusDetails: {},
-                    substatus: GroupSubstatus.ARCHIVED_UNTIL_ESCALATING,
-                  })
-                }
-              />
+                display={{label: t('Archive for\u2026'), icon: <IconClock />}}
+                keywords={['ignore', 'mute', 'snooze']}
+              >
+                {IGNORE_DURATIONS.map(duration => (
+                  <CMDKAction
+                    key={`archive-for-${duration}`}
+                    display={{label: getDuration(duration * 60)}}
+                    onAction={() =>
+                      onUpdate({
+                        status: GroupStatus.IGNORED,
+                        statusDetails: {ignoreDuration: duration},
+                        substatus: GroupSubstatus.ARCHIVED_UNTIL_CONDITION_MET,
+                      })
+                    }
+                  />
+                ))}
+              </CMDKAction>
             )}
             {isResolved && resolveCap.enabled && (
               <CMDKAction
-                display={{label: t('Unresolve'), icon: <IconCheckmark />}}
-                onAction={() =>
-                  onUpdate({
-                    status: GroupStatus.UNRESOLVED,
-                    statusDetails: {},
-                    substatus: GroupSubstatus.ONGOING,
-                  })
-                }
+                display={{
+                  label: t('Unresolve'),
+                  icon: <IconCheckmark />,
+                  trailingItem: <Hotkey value="mod+alt+r" />,
+                }}
+                onAction={unresolve}
               />
             )}
             {isIgnored && (
               <CMDKAction
-                display={{label: t('Unarchive'), icon: <IconClock />}}
-                onAction={() =>
-                  onUpdate({
-                    status: GroupStatus.UNRESOLVED,
-                    statusDetails: {},
-                    substatus: GroupSubstatus.ONGOING,
-                  })
-                }
+                display={{
+                  label: t('Unarchive'),
+                  icon: <IconClock />,
+                  trailingItem: <Hotkey value="mod+alt+e" />,
+                }}
+                onAction={unresolve}
               />
             )}
+            {group.inbox && (
+              <CMDKAction
+                display={{label: t('Mark reviewed'), icon: <IconCheckmark />}}
+                keywords={['inbox', 'review']}
+                onAction={() => onUpdate({inbox: false})}
+              />
+            )}
+            <CMDKAction
+              display={{
+                label: bookmarkTitle,
+                icon: <IconStar isSolid={group.isBookmarked} />,
+              }}
+              keywords={['bookmark', 'star', 'save']}
+              onAction={onToggleBookmark}
+            />
+            <CMDKAction
+              display={{
+                label: group.isSubscribed ? t('Unsubscribe') : t('Subscribe'),
+                icon: group.isSubscribed ? <IconSubscribed /> : <IconUnsubscribed />,
+              }}
+              keywords={['notifications', 'follow', 'watch']}
+              onAction={onToggleSubscribe}
+            />
+            <CMDKAction
+              display={{label: t('Share issue'), icon: <IconUpload />}}
+              keywords={['share', 'link', 'public']}
+              onAction={openShareModal}
+            />
             {stacktraceBody && (
               <CMDKAction
                 display={{

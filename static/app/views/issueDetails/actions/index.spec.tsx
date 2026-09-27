@@ -7,6 +7,7 @@ import {TeamFixture} from 'sentry-fixture/team';
 import {UserFixture} from 'sentry-fixture/user';
 
 import {
+  act,
   render,
   screen,
   userEvent,
@@ -692,6 +693,226 @@ describe('GroupActions', () => {
       expect(assignAction?.display.icon).toMatchObject({
         props: {actor: expect.objectContaining({name: 'Ada Lovelace'})},
       });
+    });
+
+    function getIssueActionLabels(tree: Array<CollectionTreeNode<CMDKActionData>>) {
+      return tree[0]?.children.map(child => child.display.label) ?? [];
+    }
+
+    it('shows state-dependent issue actions', async () => {
+      const treeRef = renderWithCommandPalette(
+        GroupFixture({...group, inbox: null, isBookmarked: false, isSubscribed: false})
+      );
+
+      await waitFor(() => {
+        expect(treeRef.current.length).toBeGreaterThan(0);
+      });
+
+      const labels = getIssueActionLabels(treeRef.current);
+      expect(labels).toEqual(
+        expect.arrayContaining([
+          'Archive forever',
+          'Archive for\u2026',
+          'Bookmark',
+          'Subscribe',
+          'Share issue',
+        ])
+      );
+      expect(labels).not.toContain('Mark reviewed');
+      expect(labels).not.toContain('Remove bookmark');
+      expect(labels).not.toContain('Resolve in next release');
+    });
+
+    it('shows mark reviewed, remove bookmark, unsubscribe and next release when applicable', async () => {
+      ProjectsStore.loadInitialData([{...project, features: ['releases']}]);
+      const labelsRef: {current: string[]} = {current: []};
+      render(
+        <CommandPaletteProvider>
+          <GroupActions
+            group={GroupFixture({
+              ...group,
+              inbox: {date_added: '2020-01-01T00:00:00Z'},
+              isBookmarked: true,
+              isSubscribed: true,
+            })}
+            project={{...project, features: ['releases']}}
+            disabled={false}
+            event={null}
+          />
+          <SlotOutlets />
+          <CommandPaletteTree
+            onTree={tree => {
+              labelsRef.current = getIssueActionLabels(tree);
+            }}
+          />
+        </CommandPaletteProvider>,
+        {organization}
+      );
+
+      await waitFor(() => {
+        expect(labelsRef.current).toContain('Mark reviewed');
+      });
+      expect(labelsRef.current).toContain('Remove bookmark');
+      expect(labelsRef.current).toContain('Unsubscribe');
+      expect(labelsRef.current).toContain('Resolve in next release');
+    });
+
+    it('archives for a duration from the command palette', async () => {
+      const issuesApi = MockApiClient.addMockResponse({
+        url: `/projects/${organization.slug}/project/issues/`,
+        method: 'PUT',
+        body: {...group, status: 'ignored'},
+      });
+      const treeRef = renderWithCommandPalette(group);
+
+      await waitFor(() => {
+        expect(treeRef.current.length).toBeGreaterThan(0);
+      });
+
+      const archiveFor = treeRef.current[0]?.children.find(
+        child => child.display.label === 'Archive for\u2026'
+      );
+      const firstDuration = archiveFor?.children[0];
+      expect(firstDuration).toBeDefined();
+      act(() => {
+        if (firstDuration && 'onAction' in firstDuration) {
+          firstDuration.onAction();
+        }
+      });
+
+      await waitFor(() =>
+        expect(issuesApi).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            data: {
+              status: 'ignored',
+              statusDetails: {ignoreDuration: 30},
+              substatus: 'archived_until_condition_met',
+            },
+          })
+        )
+      );
+    });
+  });
+
+  describe('keyboard shortcuts', () => {
+    it('resolves and unresolves with mod+alt+r', async () => {
+      const issuesApi = MockApiClient.addMockResponse({
+        url: `/projects/${organization.slug}/project/issues/`,
+        method: 'PUT',
+        body: {...group, status: 'resolved'},
+      });
+
+      const {rerender} = render(
+        <GroupActions group={group} project={project} disabled={false} event={null} />,
+        {organization}
+      );
+
+      await userEvent.keyboard('{Control>}{Alt>}r{/Alt}{/Control}');
+      expect(issuesApi).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          data: {status: 'resolved', statusDetails: {}, substatus: null},
+        })
+      );
+
+      rerender(
+        <GroupActions
+          group={{...group, status: GroupStatus.RESOLVED, statusDetails: {}}}
+          project={project}
+          disabled={false}
+          event={null}
+        />
+      );
+
+      await userEvent.keyboard('{Control>}{Alt>}r{/Alt}{/Control}');
+      expect(issuesApi).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          data: {status: 'unresolved', statusDetails: {}, substatus: 'ongoing'},
+        })
+      );
+    });
+
+    it('archives with mod+alt+e', async () => {
+      const issuesApi = MockApiClient.addMockResponse({
+        url: `/projects/${organization.slug}/project/issues/`,
+        method: 'PUT',
+        body: {...group, status: 'ignored'},
+      });
+
+      render(
+        <GroupActions group={group} project={project} disabled={false} event={null} />,
+        {organization}
+      );
+
+      await userEvent.keyboard('{Control>}{Alt>}e{/Alt}{/Control}');
+      expect(issuesApi).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          data: {
+            status: 'ignored',
+            statusDetails: {},
+            substatus: 'archived_until_escalating',
+          },
+        })
+      );
+    });
+
+    it('assigns to me with mod+alt+a', async () => {
+      ConfigStore.loadInitialData({
+        user: UserFixture({id: '1', name: 'Test User'}),
+      } as any);
+      const assignApi = MockApiClient.addMockResponse({
+        url: `/organizations/${organization.slug}/issues/${group.id}/`,
+        method: 'PUT',
+        body: {...group, assignedTo: {id: '1', type: 'user', name: 'Test User'}},
+      });
+
+      render(
+        <GroupActions group={group} project={project} disabled={false} event={null} />,
+        {organization}
+      );
+
+      await userEvent.keyboard('{Control>}{Alt>}a{/Alt}{/Control}');
+      await waitFor(() =>
+        expect(assignApi).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            data: expect.objectContaining({assignedTo: 'user:1'}),
+          })
+        )
+      );
+    });
+
+    it('does not fire when disabled or when an input is focused', async () => {
+      const issuesApi = MockApiClient.addMockResponse({
+        url: `/projects/${organization.slug}/project/issues/`,
+        method: 'PUT',
+        body: group,
+      });
+
+      const {rerender} = render(
+        <Fragment>
+          <input aria-label="text input" />
+          <GroupActions group={group} project={project} disabled event={null} />
+        </Fragment>,
+        {organization}
+      );
+
+      await userEvent.keyboard('{Control>}{Alt>}r{/Alt}{/Control}');
+      expect(issuesApi).not.toHaveBeenCalled();
+
+      rerender(
+        <Fragment>
+          <input aria-label="text input" />
+          <GroupActions group={group} project={project} disabled={false} event={null} />
+        </Fragment>
+      );
+
+      await userEvent.click(screen.getByRole('textbox', {name: 'text input'}));
+      await userEvent.keyboard('{Control>}{Alt>}r{/Alt}{/Control}');
+      expect(issuesApi).not.toHaveBeenCalled();
     });
   });
 });

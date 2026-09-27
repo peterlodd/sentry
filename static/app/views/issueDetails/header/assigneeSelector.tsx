@@ -3,6 +3,7 @@ import {useQuery} from '@tanstack/react-query';
 
 import {ActorAvatar, TeamAvatar} from '@sentry/scraps/avatar';
 import {MenuComponents} from '@sentry/scraps/compactSelect';
+import {Hotkey} from '@sentry/scraps/hotkey';
 
 import {openIssueOwnershipRuleModal} from 'sentry/actionCreators/modal';
 import type {AssignmentDetails} from 'sentry/components/assigneeBadge';
@@ -217,6 +218,7 @@ export function GroupHeaderAssigneeCommandPaletteAction({
                 hasTooltip={false}
               />
             ),
+            trailingItem: <Hotkey value="mod+alt+a" />,
           }}
           onAction={() =>
             handleAssigneeChange({
