@@ -41,9 +41,15 @@ describe('IssueList -> Polling', () => {
     MockApiClient.clearMockResponses();
   });
 
+  const NOW = new Date('2026-09-28T12:00:00.000Z');
   const project = ProjectFixture();
-  const group = GroupFixture({project});
-  const group2 = GroupFixture({project, id: '2'});
+  // Use recent lastSeen so live-mode time-range pruning does not drop fixture rows.
+  const group = GroupFixture({project, lastSeen: '2026-09-28T11:55:00.000Z'});
+  const group2 = GroupFixture({
+    project,
+    id: '2',
+    lastSeen: '2026-09-28T11:56:00.000Z',
+  });
 
   /* helpers */
   const renderComponent = async () => {
@@ -60,10 +66,14 @@ describe('IssueList -> Polling', () => {
       await Promise.resolve();
       await jest.runAllTimersAsync();
     });
+
+    // renderComponent may advance fake timers; pin wall clock for prune checks.
+    jest.setSystemTime(NOW);
   };
 
   beforeEach(() => {
     jest.useFakeTimers();
+    jest.setSystemTime(NOW);
 
     MockApiClient.clearMockResponses();
     MockApiClient.addMockResponse({
@@ -118,7 +128,13 @@ describe('IssueList -> Polling', () => {
     });
     MockApiClient.addMockResponse({
       url: '/organizations/org-slug/issues-stats/',
-      body: [GroupStatsFixture()],
+      body: [
+        GroupStatsFixture({
+          id: group.id,
+          lastSeen: group.lastSeen,
+          firstSeen: '2026-09-28T11:00:00.000Z',
+        }),
+      ],
     });
     pollRequest = MockApiClient.addMockResponse({
       url: `/api/0/organizations/org-slug/issues/?cursor=${PREVIOUS_PAGE_CURSOR}:0:1`,
@@ -204,8 +220,6 @@ describe('IssueList -> Polling', () => {
   });
 
   it('removes issues that age out of the selected time range during live updates', async () => {
-    jest.setSystemTime(new Date('2026-09-28T12:00:00.000Z'));
-
     const recentGroup = GroupFixture({
       project,
       id: '1',
@@ -231,6 +245,21 @@ describe('IssueList -> Polling', () => {
         'X-Hits': '2',
       },
     });
+    MockApiClient.addMockResponse({
+      url: '/organizations/org-slug/issues-stats/',
+      body: [
+        GroupStatsFixture({
+          id: recentGroup.id,
+          lastSeen: recentGroup.lastSeen,
+          firstSeen: '2026-09-28T11:00:00.000Z',
+        }),
+        GroupStatsFixture({
+          id: agingGroup.id,
+          lastSeen: agingGroup.lastSeen,
+          firstSeen: '2026-09-28T11:00:00.000Z',
+        }),
+      ],
+    });
     pollRequest = MockApiClient.addMockResponse({
       url: `/api/0/organizations/org-slug/issues/?cursor=${PREVIOUS_PAGE_CURSOR}:0:1`,
       body: [],
@@ -251,6 +280,7 @@ describe('IssueList -> Polling', () => {
     );
 
     // Advance wall clock so group 2 falls outside the 30m window, then poll.
+    // Pin absolute time (do not rely on timer advancement for the window slide).
     jest.setSystemTime(new Date('2026-09-28T12:10:00.000Z'));
     await act(() => jest.advanceTimersByTimeAsync(3001));
 
