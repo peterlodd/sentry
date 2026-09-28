@@ -76,9 +76,14 @@ export class CursorPoller {
         return;
       }
 
-      // if theres no data, nothing changes
+      const hitsHeader = resp?.getResponseHeader('X-Hits') ?? null;
+      const queryCount = defined(hitsHeader) ? parseInt(hitsHeader, 10) || 0 : 0;
+
+      // Empty polls still invoke success so consumers can age out issues as a
+      // relative time window advances, even when no new issues arrived.
       if (!data?.length) {
         this.reqsWithoutData += 1;
+        this.options.success([], {queryCount});
         return;
       }
 
@@ -87,8 +92,6 @@ export class CursorPoller {
       }
 
       const linksHeader = resp?.getResponseHeader('Link') ?? null;
-      const hitsHeader = resp?.getResponseHeader('X-Hits') ?? null;
-      const queryCount = defined(hitsHeader) ? parseInt(hitsHeader, 10) || 0 : 0;
       const links = parseLinkHeader(linksHeader);
       this.setEndpoint(links.previous!.href);
 
