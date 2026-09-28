@@ -393,10 +393,7 @@ const storeConfig: GroupStoreDefinition = {
     ids.forEach(itemId => this.clearStatus(itemId, 'update'));
 
     if (!failSilently) {
-      showAlert(
-        errorMessage || t('Unable to update events. Please try again.'),
-        'error'
-      );
+      showAlert(errorMessage || t('Unable to update events. Please try again.'), 'error');
     }
 
     this.updateItems(ids);
