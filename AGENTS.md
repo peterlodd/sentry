@@ -127,3 +127,9 @@ Frontend (`static/`) and backend (`src/`, `tests/`) are **not atomically deploye
 - If your changes touch both frontend and backend, split them into **separate PRs**.
 - Land the backend PR first when the frontend depends on new API changes.
 - Pure test additions alongside `src/` changes are fine in one PR.
+
+## Cursor Cloud specific instructions
+
+The Cloud Agent image already has `uv` 0.12.10, `devenv` 1.28.0, Node 24.14.0 (under `.devenv/bin`), and the Python 3.13 virtualenv. On boot, use the injected Docker daemon at `tcp://127.0.0.1:2375` when `/var/run/docker.sock` is stale, then `devservices up --mode migrations` brings up Postgres and Redis. Set `VIRTUAL_ENV=/workspace/.venv` before `make apply-migrations`, and start the dev server with `SENTRY_SPOTLIGHT=0` so warmup does not block on Spotlight DNS. The dev server listens on port 8000 (webpack) and port 8001 (API). Sign in at `http://127.0.0.1:8000/auth/login/sentry/` with `admin@sentry.io` / `admin`. `/etc/hosts` should map `sentry.localhost` to `127.0.0.1` for org subdomains.
+
+`devenv sync` fails while Cursor's `core.hooksPath` is set, because `prek install` refuses that config. Unset the local `core.hooksPath` for the sync and restore it afterward. `SENTRY_DEVENV_FRONTEND_ONLY=1` skips migrations; the boot path applies them when `sentry_organization` is missing. Kafka is not part of migrations mode, so upgrade logs that cannot reach port 9092 are expected and time out. A full ingest stack is `devservices up` (default mode) and needs more memory than this VM. Backend tests: `.venv/bin/pytest --reuse-db` against Postgres. Use `-n1` if `-n3` reports that workers collected tests in a different order.
