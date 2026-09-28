@@ -241,19 +241,34 @@ function ReleasesDetailContainer() {
 
   useRouteAnalyticsParams({release});
 
-  // Remove global date time from URL
+  // Strip trailing slashes from `?project=` (e.g. `?project=123/`) and remove
+  // global datetime params. Trailing slashes make the backend reject the id
+  // with a 400, and ReleasesDetail filters those out of visible errors, which
+  // leaves a blank page. Both cleanups share one navigate() so they cannot
+  // race and undo each other.
   useEffect(() => {
-    const {start, end, statsPeriod, utc, ...restQuery} = location.query;
+    const {start, end, statsPeriod, utc, project, ...restQuery} = location.query;
 
-    if (start || end || statsPeriod || utc) {
-      navigate(
-        {
-          ...location,
-          query: restQuery,
-        },
-        {replace: true}
-      );
+    const shouldStripProjectSlash =
+      typeof project === 'string' && project !== project.replace(/\/+$/, '');
+    const shouldRemoveDateTimeParams = !!(start || end || statsPeriod || utc);
+
+    if (!shouldStripProjectSlash && !shouldRemoveDateTimeParams) {
+      return;
     }
+
+    navigate(
+      {
+        ...location,
+        query: {
+          ...restQuery,
+          ...(project === undefined
+            ? {}
+            : {project: shouldStripProjectSlash ? project.replace(/\/+$/, '') : project}),
+        },
+      },
+      {replace: true}
+    );
   }, [location, navigate]);
 
   const {data: releaseMeta, isPending, isError, error} = useReleaseMeta({release});
