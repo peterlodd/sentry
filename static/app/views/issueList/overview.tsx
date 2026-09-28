@@ -55,6 +55,7 @@ import {IssuesDataConsentBanner} from 'sentry/views/issueList/issuesDataConsentB
 import {IssueSelectionProvider} from 'sentry/views/issueList/issueSelectionContext';
 import {IssueViewsHeader} from 'sentry/views/issueList/issueViewsHeader';
 import type {IssueUpdateData} from 'sentry/views/issueList/types';
+import {getGroupIdsOutsideDatetimeRange} from 'sentry/views/issueList/utils/getGroupIdsOutsideDatetimeRange';
 import {parseIssuePrioritySearch} from 'sentry/views/issueList/utils/parseIssuePrioritySearch';
 import {useLLMContext} from 'sentry/views/seerExplorer/contexts/llmContext';
 import {registerLLMContext} from 'sentry/views/seerExplorer/contexts/registerLLMContext';
@@ -189,15 +190,27 @@ function IssueListOverviewInner({
       // Note: We do not update state with cursors from polling,
       // `CursorPoller` updates itself with new cursors
       GroupStore.addToFront(data);
+
+      // Live mode only fetches new issues; drop any loaded issues whose
+      // lastSeen has slid outside the selected page-filter time window.
+      const staleGroupIds = getGroupIdsOutsideDatetimeRange(
+        GroupStore.getAllItems(),
+        selection.datetime
+      );
+      if (staleGroupIds.length > 0) {
+        GroupStore.remove(staleGroupIds);
+      }
+
       setQueryCount(newQueryCount);
     },
-    []
+    [selection.datetime]
   );
 
   useEffect(() => {
     // Either cleanup or reuse the poller to prevent a resource leak.
     if (pollerRef.current) {
       pollerRef.current.setEndpoint(parseLinkHeader(pageLinks)?.previous?.href!);
+      pollerRef.current.options.success = onRealtimePoll;
       return;
     }
 

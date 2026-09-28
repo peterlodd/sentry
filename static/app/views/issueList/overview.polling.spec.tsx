@@ -7,6 +7,7 @@ import {TagsFixture} from 'sentry-fixture/tags';
 import {act, render, screen, userEvent, waitFor} from 'sentry-test/reactTestingLibrary';
 import {textWithMarkupMatcher} from 'sentry-test/utils';
 
+import {PageFiltersStore} from 'sentry/components/pageFilters/store';
 import {StreamGroup} from 'sentry/components/stream/group';
 import {TagStore} from 'sentry/stores/tagStore';
 import type {Group} from 'sentry/types/group';
@@ -40,9 +41,15 @@ describe('IssueList -> Polling', () => {
     MockApiClient.clearMockResponses();
   });
 
+  const NOW = new Date('2026-09-28T12:00:00.000Z');
   const project = ProjectFixture();
-  const group = GroupFixture({project});
-  const group2 = GroupFixture({project, id: '2'});
+  // Use recent lastSeen so live-mode time-range pruning does not drop fixture rows.
+  const group = GroupFixture({project, lastSeen: '2026-09-28T11:55:00.000Z'});
+  const group2 = GroupFixture({
+    project,
+    id: '2',
+    lastSeen: '2026-09-28T11:56:00.000Z',
+  });
 
   /* helpers */
   const renderComponent = async () => {
@@ -59,10 +66,14 @@ describe('IssueList -> Polling', () => {
       await Promise.resolve();
       await jest.runAllTimersAsync();
     });
+
+    // renderComponent may advance fake timers; pin wall clock for prune checks.
+    jest.setSystemTime(NOW);
   };
 
   beforeEach(() => {
     jest.useFakeTimers();
+    jest.setSystemTime(NOW);
 
     MockApiClient.clearMockResponses();
     MockApiClient.addMockResponse({
@@ -117,7 +128,13 @@ describe('IssueList -> Polling', () => {
     });
     MockApiClient.addMockResponse({
       url: '/organizations/org-slug/issues-stats/',
-      body: [GroupStatsFixture()],
+      body: [
+        GroupStatsFixture({
+          id: group.id,
+          lastSeen: group.lastSeen,
+          firstSeen: '2026-09-28T11:00:00.000Z',
+        }),
+      ],
     });
     pollRequest = MockApiClient.addMockResponse({
       url: `/api/0/organizations/org-slug/issues/?cursor=${PREVIOUS_PAGE_CURSOR}:0:1`,
@@ -126,6 +143,12 @@ describe('IssueList -> Polling', () => {
         Link: DEFAULT_LINKS_HEADER,
         'X-Hits': '1',
       },
+    });
+
+    PageFiltersStore.onInitializeUrlState({
+      projects: [parseInt(project.id, 10)],
+      environments: [],
+      datetime: {period: '14d', start: null, end: null, utc: null},
     });
 
     jest.mocked(StreamGroup).mockClear();
@@ -194,6 +217,79 @@ describe('IssueList -> Polling', () => {
     await screen.findByTestId('2');
 
     expect(screen.getByText(textWithMarkupMatcher('1-2 of 2'))).toBeInTheDocument();
+  });
+
+  it('removes issues that age out of the selected time range during live updates', async () => {
+    const recentGroup = GroupFixture({
+      project,
+      id: '1',
+      lastSeen: '2026-09-28T11:45:00.000Z',
+    });
+    const agingGroup = GroupFixture({
+      project,
+      id: '2',
+      lastSeen: '2026-09-28T11:35:00.000Z',
+    });
+
+    PageFiltersStore.onInitializeUrlState({
+      projects: [parseInt(project.id, 10)],
+      environments: [],
+      datetime: {period: '30m', start: null, end: null, utc: null},
+    });
+
+    issuesRequest = MockApiClient.addMockResponse({
+      url: '/organizations/org-slug/issues/',
+      body: [recentGroup, agingGroup],
+      headers: {
+        Link: DEFAULT_LINKS_HEADER,
+        'X-Hits': '2',
+      },
+    });
+    MockApiClient.addMockResponse({
+      url: '/organizations/org-slug/issues-stats/',
+      body: [
+        GroupStatsFixture({
+          id: recentGroup.id,
+          lastSeen: recentGroup.lastSeen,
+          firstSeen: '2026-09-28T11:00:00.000Z',
+        }),
+        GroupStatsFixture({
+          id: agingGroup.id,
+          lastSeen: agingGroup.lastSeen,
+          firstSeen: '2026-09-28T11:00:00.000Z',
+        }),
+      ],
+    });
+    pollRequest = MockApiClient.addMockResponse({
+      url: `/api/0/organizations/org-slug/issues/?cursor=${PREVIOUS_PAGE_CURSOR}:0:1`,
+      body: [],
+      headers: {
+        Link: DEFAULT_LINKS_HEADER,
+        'X-Hits': '1',
+      },
+    });
+
+    await renderComponent();
+
+    expect(await screen.findByTestId('1')).toBeInTheDocument();
+    expect(screen.getByTestId('2')).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('button', {name: 'Enable real-time updates'}),
+      {delay: null}
+    );
+
+    // Advance wall clock so group 2 falls outside the 30m window, then poll.
+    // Pin absolute time (do not rely on timer advancement for the window slide).
+    jest.setSystemTime(new Date('2026-09-28T12:10:00.000Z'));
+    await act(() => jest.advanceTimersByTimeAsync(3001));
+
+    expect(pollRequest).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.queryByTestId('2')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('1')).toBeInTheDocument();
+    expect(screen.getByText(textWithMarkupMatcher('1-1 of 1'))).toBeInTheDocument();
   });
 
   it('stops polling for new issues when endpoint returns a 401', async () => {
