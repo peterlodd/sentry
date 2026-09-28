@@ -1,3 +1,5 @@
+import {toast} from '@sentry/scraps/toast';
+
 import {bulkUpdate, mergeGroups, paramsToQueryArgs} from 'sentry/actionCreators/group';
 import {GroupStore} from 'sentry/stores/groupStore';
 
@@ -239,6 +241,36 @@ describe('group', () => {
         '/projects/1337/1337/issues/',
         expect.objectContaining({data: {assignedTo: 'user:123'}})
       );
+    });
+
+    it('should surface nested API validation errors in the toast', async () => {
+      const errorToastSpy = jest.spyOn(toast, 'error');
+      const nestedMessage =
+        "No release data present in the system to form a basis for 'Next Release'";
+
+      MockApiClient.addMockResponse({
+        url: '/projects/1337/1337/issues/',
+        method: 'PUT',
+        statusCode: 400,
+        body: {
+          statusDetails: {
+            inNextRelease: [nestedMessage],
+          },
+        },
+      });
+
+      await bulkUpdate(
+        new MockApiClient(),
+        {
+          orgId: '1337',
+          projectId: '1337',
+          itemIds: ['1'],
+          data: {status: 'resolved', statusDetails: {inNextRelease: true}},
+        },
+        {}
+      );
+
+      expect(errorToastSpy).toHaveBeenCalledWith(nestedMessage, {duration: 4000});
     });
   });
 

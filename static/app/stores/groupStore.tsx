@@ -75,7 +75,12 @@ interface GroupStoreDefinition extends StrictStoreDefinition<Item[]>, InternalDe
   onPopulateStats: (itemIds: ItemIds, response: GroupStats[]) => void;
 
   onUpdate: (changeId: string, itemIds: ItemIds, data: any) => void;
-  onUpdateError: (changeId: string, itemIds: ItemIds, silent: boolean) => void;
+  onUpdateError: (
+    changeId: string,
+    itemIds: ItemIds,
+    silent: boolean,
+    errorMessage?: string
+  ) => void;
   onUpdateSuccess: (changeId: string, itemIds: ItemIds, response: Partial<Group>) => void;
 
   remove: (itemIds: ItemIds) => void;
@@ -381,14 +386,17 @@ const storeConfig: GroupStoreDefinition = {
     this.updateItems(ids);
   },
 
-  onUpdateError(changeId, itemIds, failSilently) {
+  onUpdateError(changeId, itemIds, failSilently, errorMessage) {
     const ids = this.itemIdsOrAll(itemIds);
 
     this.pendingChanges.delete(changeId);
     ids.forEach(itemId => this.clearStatus(itemId, 'update'));
 
     if (!failSilently) {
-      showAlert(t('Unable to update events. Please try again.'), 'error');
+      showAlert(
+        errorMessage || t('Unable to update events. Please try again.'),
+        'error'
+      );
     }
 
     this.updateItems(ids);
