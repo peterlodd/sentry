@@ -6,6 +6,7 @@ import {GroupStore} from 'sentry/stores/groupStore';
 import type {Group, Tag as GroupTag, TagValue} from 'sentry/types/group';
 import type {Organization} from 'sentry/types/organization';
 import {apiOptions} from 'sentry/utils/api/apiOptions';
+import {getResponseErrorMessage} from 'sentry/utils/getResponseErrorMessage';
 import {uniqueId} from 'sentry/utils/guid';
 import {parseActorString} from 'sentry/utils/parseActorString';
 import {RequestError} from 'sentry/utils/requestError/requestError';
@@ -153,7 +154,9 @@ export async function bulkUpdate(
     GroupStore.onUpdateSuccess(id, itemIds, response);
     options?.success?.(response, statusText, responseMeta);
   } catch (error) {
-    GroupStore.onUpdateError(id, itemIds, !!failSilently);
+    const requestError = error as RequestError;
+    const errorMessage = getResponseErrorMessage(requestError.responseJSON);
+    GroupStore.onUpdateError(id, itemIds, !!failSilently, errorMessage);
     options?.error?.(error);
   } finally {
     options?.complete?.(responseMeta, statusText ?? '');

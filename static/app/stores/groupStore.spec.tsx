@@ -220,6 +220,35 @@ describe('GroupStore', () => {
         expect(GroupStore.trigger).toHaveBeenCalledTimes(1);
         expect(GroupStore.trigger).toHaveBeenCalledWith(new Set(['1', '2', '3']));
       });
+
+      it('should show API error message when provided', () => {
+        const errorToastSpy = jest.spyOn(toast, 'error');
+        const apiMessage =
+          "No release data present in the system to form a basis for 'Next Release'";
+
+        GroupStore.onUpdateError('1337', ['1'], false, apiMessage);
+
+        expect(errorToastSpy).toHaveBeenCalledWith(apiMessage, {duration: 4000});
+      });
+
+      it('should show generic message when no API error message is provided', () => {
+        const errorToastSpy = jest.spyOn(toast, 'error');
+
+        GroupStore.onUpdateError('1337', ['1'], false);
+
+        expect(errorToastSpy).toHaveBeenCalledWith(
+          'Unable to update events. Please try again.',
+          {duration: 4000}
+        );
+      });
+
+      it('should not show a toast when failSilently is true', () => {
+        const errorToastSpy = jest.spyOn(toast, 'error');
+
+        GroupStore.onUpdateError('1337', ['1'], true, 'some error');
+
+        expect(errorToastSpy).not.toHaveBeenCalled();
+      });
     });
 
     describe('onDeleteSuccess()', () => {
